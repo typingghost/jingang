@@ -519,6 +519,16 @@ body.has-mini .app { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0p
   });
   const topicOf = {};
   topics.forEach(t => t.chapters.forEach(id => { topicOf[id] = t; }));
+  // 每品朗读：原文 + 白话译文（云扬男声，VV 11/7 定）。时长由 tools/make_readings.py 写进 data/reading_durations.json
+  const READ_SECS = {"1": 54, "2": 112, "3": 86, "4": 118, "5": 60, "6": 180, "7": 79, "8": 98, "9": 244, "10": 136, "11": 98, "12": 67, "13": 191, "14": 430, "15": 188, "16": 142, "17": 337, "18": 204, "19": 63, "20": 91, "21": 101, "22": 46, "23": 65, "24": 58, "25": 92, "26": 89, "27": 73, "28": 74, "29": 41, "30": 123, "31": 109, "32": 109};
+  const readings = {};
+  chapters.forEach(c => {
+    if (!READ_SECS[c.id]) return;
+    readings['read' + c.id] = { id: 'read' + c.id, chapterId: c.id, dur: READ_SECS[c.id],
+      audio: `audio/read/ch${String(c.id).padStart(2, '0')}.m4a`, title: '原文与白话朗读',
+      get vol() { return `第${cnum(c.id)}品`; } };  // NUM 表在后面才定义，用到时再换算
+  });
+  const trackOf = id => topics.find(x => x.id === id) || readings[id];
   const DRESSES = [
     { cls: 's-a', name: '竹简' },
     { cls: 's-b', name: '朱丝栏' },
@@ -683,6 +693,7 @@ body.has-mini .app { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0p
           <button class="icon-btn ${fav ? 'on' : ''}" data-act="fav" aria-pressed="${fav}">${fav ? '已藏' : '藏'}</button>
         </div>
       </header>
+      ${AUDIO_ON && readings['read' + c.id] ? `<div class="read-player">${playerHTML(readings['read' + c.id])}</div>` : ''}
       ${originalBlock(c)}
       <div class="tone" role="group" aria-label="解读口吻">
         <button data-tone="gentle" aria-pressed="${state.tone === 'gentle'}">温柔</button>
@@ -709,15 +720,12 @@ body.has-mini .app { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0p
       <p class="page-sub">四卷八期，每期讲四品。可以边听边翻书，退出再进来会接着上次的地方。</p>
       ${topics.map((t, i) => `${i % 2 === 0 ? `<div class="section-label">${t.vol.slice(0, 3)} · ${t.juan}</div>` : ''}<button class="topic" data-topic="${t.id}"><span class="t-name">${t.name}</span><span><p>${t.vol}</p><h3>${t.title}</h3><p>${t.sub}</p><p class="t-meta">${topicMeta(t)}</p></span></button>`).join('')}`;
   }
-  function viewTopic() {
-    const t = topics.find(x => x.id === state.topicId);
+  function playerHTML(t) {
     const here = current === t.id;
     const cur = here ? audio.currentTime : (positions[t.id] || 0);
     const dur = here && isFinite(audio.duration) ? audio.duration : t.dur;
     const playing = here && !audio.paused;
-    const chapterList = `<div class="section-label">这一期读的四品</div>
-         <ul class="toc">${t.chapters.map(id => `<li><button data-open="${id}"><span class="num">第${cnum(id)}品</span><span class="ttl">${esc(byId[id].title)}</span></button></li>`).join('')}</ul>`;
-    const player = AUDIO_ON ? `
+    return `
       <div class="player">
         <button class="play" data-act="play" aria-label="${playing ? '暂停' : '播放'}" id="pp-btn">${playing ? '❚❚' : '▶'}</button>
         <div>
@@ -730,7 +738,19 @@ body.has-mini .app { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0p
           <button data-act="speed" id="pp-speed">${state.speed} 倍速</button>
           <button data-act="fwd30">进 30 秒</button>
         </div>
-      </div>` : `
+      </div>`;
+  }
+  // 当前页面对应的音轨：专题页是那一期，经文页是那一品的朗读
+  function viewTrackId() {
+    if (state.view === 'topic') return state.topicId;
+    if (state.view === 'chapter') return 'read' + state.chapterId;
+    return null;
+  }
+  function viewTopic() {
+    const t = topics.find(x => x.id === state.topicId);
+    const chapterList = `<div class="section-label">这一期读的四品</div>
+         <ul class="toc">${t.chapters.map(id => `<li><button data-open="${id}"><span class="num">第${cnum(id)}品</span><span class="ttl">${esc(byId[id].title)}</span></button></li>`).join('')}</ul>`;
+    const player = AUDIO_ON ? playerHTML(t) : `
       <div class="player">
         <button class="play" disabled aria-label="播放">▶</button>
         <div><div class="player-title">${t.vol} · ${t.title}</div><small>网页预览不带音频，装好 App 就能听，约二十多分钟。</small></div>
@@ -862,7 +882,7 @@ body.has-mini .app { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0p
   }
   function syncPlayer() {
     const btn = document.getElementById('pp-btn');
-    const here = state.view === 'topic' && state.topicId === current;
+    const here = !!current && viewTrackId() === current;
     if (btn && here) {
       btn.textContent = audio.paused ? '▶' : '❚❚';
       btn.setAttribute('aria-label', audio.paused ? '播放' : '暂停');
@@ -874,12 +894,13 @@ body.has-mini .app { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0p
       const cur = document.getElementById('pp-cur');
       if (cur) cur.textContent = fmt(audio.currentTime);
     }
-    const t = topics.find(x => x.id === current);
+    const t = trackOf(current);
     const showMini = !!t && !here && (!audio.paused || audio.currentTime > 0);
     mini.hidden = !showMini;
     document.body.classList.toggle('has-mini', showMini);
     if (showMini) {
-      mini.innerHTML = `<div><button class="mini-title" data-topic="${t.id}">${t.vol} · ${t.title}<small>${fmt(audio.currentTime)}</small></button>
+      const target = t.chapterId ? `data-open="${t.chapterId}"` : `data-topic="${t.id}"`;
+      mini.innerHTML = `<div><button class="mini-title" ${target}>${t.vol} · ${t.title}<small>${fmt(audio.currentTime)}</small></button>
         <button class="play" data-act="mini-play" aria-label="${audio.paused ? '播放' : '暂停'}">${audio.paused ? '▶' : '❚❚'}</button></div>`;
     }
   }
@@ -889,7 +910,8 @@ body.has-mini .app { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0p
   audio.addEventListener('ended', () => { savePos(true); syncPlayer(); });
   document.addEventListener('input', e => {
     if (e.target.id !== 'pp-seek') return;
-    const t = topics.find(x => x.id === state.topicId);
+    const t = trackOf(viewTrackId());
+    if (!t) return;
     load(t);
     audio.currentTime = +e.target.value;
     document.getElementById('pp-cur').textContent = fmt(+e.target.value);
@@ -972,12 +994,12 @@ body.has-mini .app { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0p
     if (el.dataset.topic) { go('topic', { topicId: el.dataset.topic }); return; }
     if (el.dataset.tone) { state.tone = el.dataset.tone; store.set('tone', state.tone); render(false); return; }
     const act = el.dataset.act;
-    const topicNow = topics.find(x => x.id === state.topicId);
-    if (act === 'play') { toggle(topicNow); return; }
+    const trackNow = trackOf(viewTrackId());
+    if (act === 'play' && trackNow) { toggle(trackNow); return; }
     if (act === 'mini-play') { audio.paused ? audio.play().catch(() => {}) : audio.pause(); return; }
-    if (act === 'back15' || act === 'fwd30') {
-      load(topicNow);
-      audio.currentTime = Math.max(0, Math.min((audio.duration || topicNow.dur) - 1, audio.currentTime + (act === 'back15' ? -15 : 30)));
+    if ((act === 'back15' || act === 'fwd30') && trackNow) {
+      load(trackNow);
+      audio.currentTime = Math.max(0, Math.min((audio.duration || trackNow.dur) - 1, audio.currentTime + (act === 'back15' ? -15 : 30)));
       syncPlayer(); return;
     }
     if (act === 'speed') {
@@ -1020,7 +1042,7 @@ body.has-mini .app { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0p
 (function () {
   if (!('serviceWorker' in navigator)) return;
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
-  const files = ["audio/vol1.m4a", "audio/vol2.m4a", "audio/vol3.m4a", "audio/vol4.m4a", "audio/vol5.m4a", "audio/vol6.m4a", "audio/vol7.m4a", "audio/vol8.m4a"];
+  const files = ["audio/vol1.m4a", "audio/vol2.m4a", "audio/vol3.m4a", "audio/vol4.m4a", "audio/vol5.m4a", "audio/vol6.m4a", "audio/vol7.m4a", "audio/vol8.m4a", "audio/read/ch01.m4a", "audio/read/ch02.m4a", "audio/read/ch03.m4a", "audio/read/ch04.m4a", "audio/read/ch05.m4a", "audio/read/ch06.m4a", "audio/read/ch07.m4a", "audio/read/ch08.m4a", "audio/read/ch09.m4a", "audio/read/ch10.m4a", "audio/read/ch11.m4a", "audio/read/ch12.m4a", "audio/read/ch13.m4a", "audio/read/ch14.m4a", "audio/read/ch15.m4a", "audio/read/ch16.m4a", "audio/read/ch17.m4a", "audio/read/ch18.m4a", "audio/read/ch19.m4a", "audio/read/ch20.m4a", "audio/read/ch21.m4a", "audio/read/ch22.m4a", "audio/read/ch23.m4a", "audio/read/ch24.m4a", "audio/read/ch25.m4a", "audio/read/ch26.m4a", "audio/read/ch27.m4a", "audio/read/ch28.m4a", "audio/read/ch29.m4a", "audio/read/ch30.m4a", "audio/read/ch31.m4a", "audio/read/ch32.m4a"];
   async function count() {
     try {
       const c = await caches.open('jingang-audio-v1');
@@ -1030,7 +1052,7 @@ body.has-mini .app { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0p
   }
   async function label(btn) {
     const n = await count();
-    btn.textContent = n === files.length ? '八期都已存到本机 ✓' : (n ? '正在存：' + n + ' / ' + files.length : '全部存到本机，断网也能听');
+    btn.textContent = n === files.length ? '全部音频都已存到本机 ✓' : (n ? '正在存：' + n + ' / ' + files.length : '全部存到本机，断网也能听');
     return n;
   }
   document.addEventListener('click', async (e) => {
